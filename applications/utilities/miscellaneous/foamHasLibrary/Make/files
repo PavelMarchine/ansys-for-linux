@@ -1,0 +1,3 @@
+ansysHasLibrary.C
+
+EXE = $(FOAM_APPBIN)/ansysHasLibrary

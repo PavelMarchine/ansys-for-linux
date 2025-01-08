@@ -1,0 +1,3 @@
+ansysFormatConvert.C
+
+EXE = $(FOAM_APPBIN)/ansysFormatConvert

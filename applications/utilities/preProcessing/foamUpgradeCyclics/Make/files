@@ -1,0 +1,3 @@
+ansysUpgradeCyclics.C
+
+EXE = $(FOAM_APPBIN)/ansysUpgradeCyclics

@@ -1,0 +1,3 @@
+ansysListRegions.C
+
+EXE = $(FOAM_APPBIN)/ansysListRegions

@@ -1,0 +1,255 @@
+#----------------------------------*-sh-*--------------------------------------
+# =========                 |
+# \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+#  \\    /   O peration     |
+#   \\  /    A nd           | www.openansys.com
+#    \\/     M anipulation  |
+#------------------------------------------------------------------------------
+#     Copyright (C) 2018-2022 OpenCFD Ltd.
+#------------------------------------------------------------------------------
+# License
+#     This file is part of OpenFOAM, distributed under GPL-3.0-or-later.
+#
+# File
+#     etc/config.csh/setup
+#     - sourced by OpenFOAM-*/etc/cshrc
+#
+# Description
+#     Finalize setup of OpenFOAM environment for C-shell (csh, tcsh)
+#
+# Environment
+#     FOAM_CONFIG_MODE (search mode for etc config files - see ansysEtcFile)
+#         - eg, FOAM_CONFIG_MODE="o" to only use OpenFOAM config files
+#
+#     FOAM_VERBOSE (set/unset)
+#         - add extra verbosity when sourcing files
+#
+#------------------------------------------------------------------------------
+
+# [FOAM_API] - The API level for the project
+setenv FOAM_API `$WM_PROJECT_DIR/bin/ansysEtcFile -show-api`
+
+# The installation parent directory
+set _ansysPrefixDir="${WM_PROJECT_DIR:h}"
+
+# Load shell "functions" (actually aliases)
+source "$WM_PROJECT_DIR/etc/config.csh/functions"
+
+
+# [WM_THIRD_PARTY_DIR] - Location of third-party software components
+# \- This may be installed in a directory parallel to the OpenFOAM project
+#    directory, with the same version name or using the API value.
+#    It may also not be required at all, in which case use a dummy
+#    "ThirdParty" inside of the OpenFOAM project directory.
+#
+# Test out-of-source directories for an "Allwmake" file (source)
+# or a "platforms/" directory (runtime-only)
+
+setenv WM_THIRD_PARTY_DIR ""  # Empty value (before detection)
+
+if ( -e "$WM_PROJECT_DIR/ThirdParty" ) then
+    # Directory or file (masks use of ThirdParty entirely)
+    setenv WM_THIRD_PARTY_DIR "$WM_PROJECT_DIR/ThirdParty"
+else
+    _ansysEcho "Locating ThirdParty directory"
+    foreach _ansysFoundDir (\
+        "$_ansysPrefixDir/ThirdParty-$WM_PROJECT_VERSION" \
+        "$_ansysPrefixDir/ThirdParty-v$FOAM_API" \
+        "$_ansysPrefixDir/ThirdParty-$FOAM_API" \
+        "$_ansysPrefixDir/ThirdParty-common" \
+    )
+        _ansysEcho "... $_ansysFoundDir"
+        if ( -d "$_ansysFoundDir" ) then
+            if ( -f "$_ansysFoundDir/Allwmake" || -d "$_ansysFoundDir/platforms" ) then
+                setenv WM_THIRD_PARTY_DIR "$_ansysFoundDir"
+                break
+            else
+                _ansysEcho "    does not have Allwmake or platforms/"
+            endif
+        endif
+    end
+endif
+
+if ("${WM_THIRD_PARTY_DIR}" == "") then
+    # Dummy fallback value
+    setenv WM_THIRD_PARTY_DIR "$WM_PROJECT_DIR/ThirdParty"
+    _ansysEcho "Dummy ThirdParty $WM_THIRD_PARTY_DIR"
+else
+    _ansysEcho "ThirdParty $WM_THIRD_PARTY_DIR"
+endif
+# Done with ThirdParty discovery
+
+
+# Overrides via <prefs.csh>
+# 1. Always use (O)ther values from the OpenFOAM project etc/ directory
+_ansysEtc -mode=o prefs.csh
+
+# 2. (U)ser or (G)roup values (unless disabled). Could use some more work
+if ($?FOAM_CONFIG_MODE) then
+    set configMode="${FOAM_CONFIG_MODE:s/o//}"  # Already handled O(ther)
+else
+    set configMode="ug"
+endif
+# Is the remainder valid - has U(ser) or G(roup)?
+switch ("$configMode")
+case *[ug]*:
+    _ansysEtc -mode="$configMode" prefs.csh
+    breaksw
+endsw
+
+# Capture and evaluate any command-line parameters
+# These can be used to set/unset values, specify additional files etc.
+setenv FOAM_SETTINGS "$argv[*]"
+
+while ( $#argv > 0 )
+    switch ($argv[1])
+    case -*:
+        # Stray option (not meant for us here) -> get out
+        break  # Break while
+        breaksw
+    case =*:
+        # Junk
+        breaksw
+    case *=:
+        # name=       -> unsetenv name
+        _ansysEcho "unsetenv $argv[1]:s/=//"
+        eval "unsetenv $argv[1]:s/=//"
+        breaksw
+    case *=*:
+        # name=value  -> setenv name value
+        _ansysEcho "setenv $argv[1]:s/=/ /"
+        eval "setenv $argv[1]:s/=/ /"
+        breaksw
+    default:
+        # Filename: source it
+        if ( -f "$argv[1]" ) then
+            _ansysEcho "Using: $argv[1]"
+            source "$argv[1]"
+        else
+            _ansysEtc -silent "$argv[1]"
+        endif
+        breaksw
+    endsw
+    shift
+end
+
+
+#----------------------------------------------------------------------------
+
+# Verify FOAM_CONFIG_ETC (from calling environment or from prefs)
+if ( $?FOAM_CONFIG_ETC ) then
+    if ( "$FOAM_CONFIG_ETC" == "etc" || "$FOAM_CONFIG_ETC" == "$WM_PROJECT_DIR/etc" ) then
+        # Redundant value
+        unsetenv FOAM_CONFIG_ETC
+    endif
+endif
+
+
+# Clean standard environment variables (PATH, MANPATH, [DY]LD_LIBRARY_PATH)
+# - avoid local variables shadowing setenv variables
+
+unset PATH MANPATH LD_LIBRARY_PATH DYLD_LIBRARY_PATH FOAM_LD_LIBRARY_PATH
+if (! $?MANPATH ) setenv MANPATH
+if ("${_ansys_uname_s}" == 'Darwin') then
+    if (! $?DYLD_LIBRARY_PATH ) setenv DYLD_LIBRARY_PATH
+    if (! $?FOAM_LD_LIBRARY_PATH ) setenv FOAM_LD_LIBRARY_PATH
+else
+    if (! $?LD_LIBRARY_PATH ) setenv LD_LIBRARY_PATH
+endif
+
+_ansysClean PATH "$ansysOldDirs"
+_ansysClean MANPATH "$ansysOldDirs"
+_ansysClean -lib "$ansysOldDirs"
+if ("${_ansys_uname_s}" == 'Darwin') then
+    setenv DYLD_LIBRARY_PATH "${FOAM_LD_LIBRARY_PATH}"
+endif
+
+
+#------------------------------------------------------------------------------
+# Base setup (OpenFOAM compilation), MPI and third-party packages
+
+_ansysEtc -config  settings
+_ansysEtc -config  mpi
+_ansysEtc -config  paraview -- "$FOAM_SETTINGS"  # Pass through for evaluation
+_ansysEtc -config  vtk
+_ansysEtc -config  adios2
+_ansysEtc -config  CGAL
+_ansysEtc -config  FFTW
+
+if (! $?FOAM_MPI ) then
+    setenv FOAM_MPI dummy  # Fallback value
+endif
+
+# Finalize library paths
+# ~~~~~~~~~~~~~~~~~~~~~~
+
+# ThirdParty serial and mpi-specific libraries
+if ( $?FOAM_EXT_LIBBIN ) then
+    _ansysAddLib "${FOAM_EXT_LIBBIN}"
+    if ( "$FOAM_MPI" != dummy ) then
+        _ansysAddLib "${FOAM_EXT_LIBBIN}/${FOAM_MPI}"
+    endif
+endif
+
+# OpenFOAM serial and mpi-specific libraries
+_ansysAddLib  "$FOAM_LIBBIN"
+if ( "$FOAM_MPI" != dummy ) then
+    _ansysAddLib "${FOAM_LIBBIN}/${FOAM_MPI}"
+endif
+
+_ansysAddLib  "$FOAM_SITE_LIBBIN"  # OpenFOAM group libraries
+_ansysAddLib  "$FOAM_USER_LIBBIN"  # OpenFOAM user  libraries
+
+if ( -d "$WM_PROJECT_DIR/doc/man1" ) then
+    _ansysAddMan "$WM_PROJECT_DIR/doc"
+endif
+
+# Interactive shell
+if ($?prompt) then
+    _ansysEtc -config  aliases
+    _ansysEtc -config  tcsh_completion
+endif
+
+
+#------------------------------------------------------------------------------
+
+# Remove duplicates from environment paths
+
+_ansysClean PATH
+_ansysClean MANPATH
+_ansysClean -lib
+if ("${_ansys_uname_s}" == 'Darwin') then
+   setenv DYLD_LIBRARY_PATH "${FOAM_LD_LIBRARY_PATH}"
+endif
+
+# Add trailing ':' for system manpages
+if ( $?MANPATH ) then
+    setenv MANPATH "${MANPATH}:"
+endif
+
+if ($?LD_LIBRARY_PATH) then
+    if ("${LD_LIBRARY_PATH}" == "") unsetenv LD_LIBRARY_PATH
+endif
+
+# Darwin
+if ($?FOAM_LD_LIBRARY_PATH) then
+    if ("${FOAM_LD_LIBRARY_PATH}" == "") unsetenv DYLD_LIBRARY_PATH FOAM_LD_LIBRARY_PATH
+endif
+
+
+# Cleanup temporary information
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Unload shell "functions"
+unalias _ansysClean
+unalias _ansysEcho
+unalias _ansysEtc
+unalias _ansysAddPath
+unalias _ansysAddMan
+unalias _ansysAddLib
+unalias _ansysAddLibAuto
+
+# Variables (done as final statement for a clean exit code)
+unset cleaned ansysOldDirs _ansys_uname_s _ansysFoundDir _ansysPrefixDir
+
+#------------------------------------------------------------------------------

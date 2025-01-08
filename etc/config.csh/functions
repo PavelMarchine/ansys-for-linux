@@ -1,0 +1,90 @@
+#----------------------------------*-sh-*--------------------------------------
+# =========                 |
+# \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+#  \\    /   O peration     |
+#   \\  /    A nd           | www.openansys.com
+#    \\/     M anipulation  |
+#------------------------------------------------------------------------------
+#     Copyright (C) 2018-2022 OpenCFD Ltd.
+#------------------------------------------------------------------------------
+# License
+#     This file is part of OpenFOAM, distributed under GPL-3.0-or-later.
+#
+# File
+#     etc/config.csh/functions
+#     - sourced by OpenFOAM-*/etc/cshrc
+#
+# Description
+#     C-shell aliases and variables used when sourcing the OpenFOAM environment
+#
+#     Some functionality implemented via bin/tools/lib-dir
+#
+# Defined Variables
+#     ansysClean           : path to bin/ansysCleanPath
+#     _ansys_uname_s       : cache value for `uname -s`
+#
+# Defined Functions (Aliases)
+#     _ansysClean     : eval call to ansysCleanPath for specific shell
+#     _ansysEcho      : silent/non-silent echo
+#     _ansysEtc       : resolve etc files (silent or verbose)
+#     _ansysAddPath   : prepend to PATH
+#     _ansysAddMan    : prepend to MANPATH
+#     _ansysAddLib    : prepend to [DY]LD_LIBRARY_PATH
+#     _ansysAddLibAuto: call to lib-dir for lib64/lib resolved name
+#
+#------------------------------------------------------------------------------
+
+# Cleaning environment variables
+alias _ansysClean 'eval `$WM_PROJECT_DIR/bin/ansysCleanPath -csh-env=\!*`'
+
+# Cache value for `uname -s`
+set _ansys_uname_s=`uname -s`
+
+# Prepend PATH, MANPATH, LD_LIBRARY_PATH
+alias _ansysAddPath 'setenv PATH \!*\:${PATH}'
+alias _ansysAddMan  'setenv MANPATH \!*\:${MANPATH}'
+
+# Special treatment for Darwin
+# - DYLD_LIBRARY_PATH instead of LD_LIBRARY_PATH
+if ("${_ansys_uname_s}" == 'Darwin') then
+    alias _ansysAddLib 'if (-e \!*) setenv DYLD_LIBRARY_PATH \!*\:${DYLD_LIBRARY_PATH}; if (-e \!*) setenv FOAM_LD_LIBRARY_PATH \!*\:${FOAM_LD_LIBRARY_PATH}'
+else
+    alias _ansysAddLib 'setenv LD_LIBRARY_PATH \!*\:${LD_LIBRARY_PATH}'
+endif
+
+# Prefix to LD_LIBRARY_PATH with additional checking
+# $1 = base directory for 'lib' or 'lib64'
+# $2 = fallback libname ('lib' or 'lib64')
+alias _ansysAddLibAuto 'eval `$WM_PROJECT_DIR/bin/tools/lib-dir -csh \!*`'
+
+# Echo values when FOAM_VERBOSE is on, no-op otherwise
+# Source an etc file, possibly with some verbosity
+if ($?FOAM_VERBOSE && $?prompt) then
+    alias _ansysEcho 'echo \!*'
+    alias _ansysEtc 'eval `$WM_PROJECT_DIR/bin/ansysEtcFile -csh-verbose \!*`'
+else
+    alias _ansysEcho 'true'
+    alias _ansysEtc 'eval `$WM_PROJECT_DIR/bin/ansysEtcFile -csh \!*`'
+endif
+
+
+#------------------------------------------------------------------------------
+# Avoid any ThirdParty settings that may have 'leaked' into the environment
+
+unsetenv MPI_ARCH_PATH
+unsetenv ADIOS_ARCH_PATH
+unsetenv ADIOS1_ARCH_PATH
+unsetenv ADIOS2_ARCH_PATH
+unsetenv BOOST_ARCH_PATH
+unsetenv CCMIO_ARCH_PATH
+unsetenv CGAL_ARCH_PATH
+unsetenv FFTW_ARCH_PATH
+unsetenv GPERFTOOLS_ARCH_PATH
+unsetenv GMP_ARCH_PATH
+unsetenv MPFR_ARCH_PATH
+unsetenv LLVM_ARCH_PATH
+unsetenv MESA_ARCH_PATH
+unsetenv METIS_ARCH_PATH
+unsetenv SCOTCH_ARCH_PATH
+
+#------------------------------------------------------------------------------

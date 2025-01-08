@@ -1,0 +1,201 @@
+#----------------------------------*-sh-*--------------------------------------
+# =========                 |
+# \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+#  \\    /   O peration     |
+#   \\  /    A nd           | www.openansys.com
+#    \\/     M anipulation  |
+#------------------------------------------------------------------------------
+#     Copyright (C) 2011-2016 OpenFOAM Foundation
+#     Copyright (C) 2017-2022 OpenCFD Ltd.
+#------------------------------------------------------------------------------
+# License
+#     This file is part of OpenFOAM, distributed under GPL-3.0-or-later.
+#
+# File
+#     etc/config.sh/functions
+#     - sourced by OpenFOAM-*/etc/bashrc
+#
+# Description
+#     Shell functions and variables used when sourcing the OpenFOAM environment
+#
+#     Some functionality mirrored by bin/tools/lib-dir
+#
+# Defined Variables
+#     WM_SHELL_FUNCTIONS  : tracking variable
+#     ansysClean           : path to bin/ansysCleanPath
+#     _ansys_uname_s       : cache value for `uname -s`
+#
+# Defined Functions
+#     _ansysClean     : eval call to ansysCleanPath for specific shell
+#     _ansysEcho      : silent/non-silent echo
+#     _ansysEtc       : resolve etc files (silent or verbose)
+#     _ansysAddPath   : prepend to PATH
+#     _ansysAddMan    : prepend to MANPATH
+#     _ansysAddLib    : prepend to {DY,FOAM_}LD_LIBRARY_PATH
+#     _ansysAddLibAuto: prepend to lib64/lib resolved name
+#
+#------------------------------------------------------------------------------
+
+if [ -z "$WM_SHELL_FUNCTIONS" ]
+then
+    # Not previously loaded/defined - define now
+
+    # Temporary environment variable to track loading/unloading of functions
+    WM_SHELL_FUNCTIONS=loaded
+
+    # Cleaning environment variables
+    ansysClean="$WM_PROJECT_DIR/bin/ansysCleanPath"
+
+    # Cache value for `uname -s`
+    _ansys_uname_s="$(uname -s 2>/dev/null)"
+
+    # Cleaning environment variables
+    unset -f _ansysClean 2>/dev/null
+    _ansysClean()
+    {
+         ansysVar_name="$1"
+         shift
+         eval "$($ansysClean -sh-env="$ansysVar_name" "$@")"
+         unset ansysVar_name
+    }
+
+    # Echo values to stderr when FOAM_VERBOSE is on, no-op otherwise
+    # Source an etc file, possibly with some verbosity
+    # - use eval to avoid intermediate variables (ksh doesn't have 'local')
+    unset -f _ansysEcho 2>/dev/null
+    unset -f _ansysEtc 2>/dev/null
+    if [ -n "$FOAM_VERBOSE" ] && [ -n "$PS1" ]
+    then
+        _ansysEcho() { echo "$@" 1>&2; }
+        _ansysEtc()  { eval "$("$WM_PROJECT_DIR"/bin/ansysEtcFile -sh-verbose "$@")"; }
+    else
+        _ansysEcho() { true; }
+        _ansysEtc()  { eval "$("$WM_PROJECT_DIR"/bin/ansysEtcFile -sh "$@")"; }
+    fi
+
+    # Prepend PATH
+    unset -f _ansysAddPath 2>/dev/null
+    _ansysAddPath()
+    {
+        case "$1" in (/?*) export PATH="$1:$PATH" ;; esac
+    }
+
+    # Prepend MANPATH
+    unset -f _ansysAddMan 2>/dev/null
+    _ansysAddMan()
+    {
+        case "$1" in (/?*) export MANPATH="$1:$MANPATH" ;; esac
+    }
+
+    # Prepend LD_LIBRARY_PATH (DYLD_LIBRARY_PATH for Darwin)
+    unset -f _ansysAddLib 2>/dev/null
+    if [ "${_ansys_uname_s}" = Darwin ]
+    then
+        _ansysAddLib()
+        {
+            case "$1" in (/?*)
+            if [ -e "$1" ]
+            then
+                export FOAM_LD_LIBRARY_PATH="${1}${FOAM_LD_LIBRARY_PATH:+:}${FOAM_LD_LIBRARY_PATH}"
+                export DYLD_LIBRARY_PATH="$FOAM_LD_LIBRARY_PATH"
+            fi
+            esac
+        }
+    else
+        _ansysAddLib()
+        {
+            case "$1" in (/?*)
+                export LD_LIBRARY_PATH="${1}${LD_LIBRARY_PATH:+:}${LD_LIBRARY_PATH}"
+            esac
+        }
+    fi
+
+
+    # Prepend to LD_LIBRARY_PATH with additional checking
+    # $1 = base directory for 'lib' or 'lib64'
+    # $2 = fallback libname ('lib' or 'lib64')
+    #
+    # 0) Skip entirely if directory ends in "-none" or "-system".
+    #    These special cases (disabled, system directories) should not require
+    #    adjustment of LD_LIBRARY_PATH
+    # 1) Check for dir/lib64 and dir/lib
+    # 2) Use fallback if the previous failed
+    #
+    # Return 0 on success
+    unset -f _ansysAddLibAuto 2>/dev/null
+    _ansysAddLibAuto()
+    {
+        # Note ksh does not have 'local' thus these ugly variable names
+        ansysVar_prefix="$1"
+        ansysVar_end="${1##*-}"
+
+        # Do not add (none) or a system directory
+        if [ -z "$ansysVar_prefix" ] || [ "$ansysVar_end" = none ] || [ "$ansysVar_end" = system ]
+        then
+            unset ansysVar_prefix ansysVar_end
+            return 1
+        elif [ -d "$ansysVar_prefix" ]
+        then
+            for ansysVar_end in lib$WM_COMPILER_LIB_ARCH lib
+            do
+                if [ -d "$ansysVar_prefix/$ansysVar_end" ]
+                then
+                    _ansysAddLib "$ansysVar_prefix/$ansysVar_end"
+                    unset ansysVar_prefix ansysVar_end
+                    return 0
+                fi
+            done
+        fi
+
+        # Use fallback. Add without checking existence of the directory
+        ansysVar_end="$2"
+        if [ -n "$ansysVar_end" ]
+        then
+            case "$ansysVar_end" in
+            (/*)    # Absolute path
+                _ansysAddLib "$ansysVar_end"
+                ;;
+            (*)     # Relative to prefix
+                _ansysAddLib "$ansysVar_prefix/$ansysVar_end"
+                ;;
+            esac
+            unset ansysVar_prefix ansysVar_end
+            return 0
+        fi
+
+        unset ansysVar_prefix ansysVar_end
+        return 1    # Nothing set
+    }
+
+
+    #--------------------------------------------------------------------------
+    # Avoid any ThirdParty settings that may have 'leaked' into the environment
+
+    unset MPI_ARCH_PATH
+    unset ADIOS_ARCH_PATH
+    unset ADIOS1_ARCH_PATH
+    unset ADIOS2_ARCH_PATH
+    unset BOOST_ARCH_PATH
+    unset CCMIO_ARCH_PATH
+    unset CGAL_ARCH_PATH
+    unset FFTW_ARCH_PATH
+    unset GPERFTOOLS_ARCH_PATH
+    unset GMP_ARCH_PATH
+    unset MPFR_ARCH_PATH
+    unset LLVM_ARCH_PATH
+    unset MESA_ARCH_PATH
+    unset METIS_ARCH_PATH
+    unset SCOTCH_ARCH_PATH
+
+else
+    # Was previously loaded/defined - now unset
+
+    unset -f _ansysAddPath _ansysAddMan _ansysAddLib _ansysAddLibAuto 2>/dev/null
+    unset -f _ansysClean _ansysEcho _ansysEtc 2>/dev/null
+    unset ansysClean
+    unset _ansys_uname_s
+    unset WM_SHELL_FUNCTIONS
+
+fi
+
+#------------------------------------------------------------------------------

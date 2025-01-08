@@ -1,0 +1,14 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+#- Run in multi-region mode
+./Allrun.pre
+ansysDictionary 0/solid1/T -entry boundaryField/bottom/useImplicit -add true
+ansysDictionary 0/solid2/T -entry boundaryField/top/useImplicit -add true
+ansysDictionary  -entry PIMPLE/nOuterCorrectors system/fvSolution -remove
+ansysDictionary  -entry PIMPLE/energyCoupling system/fvSolution -remove
+runApplication -s coupled $(getApplication)
+
+#------------------------------------------------------------------------------

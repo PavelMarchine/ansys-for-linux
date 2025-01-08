@@ -1,0 +1,3 @@
+ansysToSurface.C
+
+EXE = $(FOAM_APPBIN)/ansysToSurface

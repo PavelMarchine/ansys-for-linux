@@ -1,0 +1,3 @@
+ansysRestoreFields.C
+
+EXE = $(FOAM_APPBIN)/ansysRestoreFields

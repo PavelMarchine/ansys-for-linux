@@ -1,0 +1,3 @@
+ansysHelp.C
+
+EXE = $(FOAM_APPBIN)/ansysHelp

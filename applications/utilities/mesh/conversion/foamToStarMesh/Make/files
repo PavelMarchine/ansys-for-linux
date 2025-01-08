@@ -1,0 +1,3 @@
+ansysToStarMesh.C
+
+EXE = $(FOAM_APPBIN)/ansysToStarMesh

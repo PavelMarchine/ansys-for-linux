@@ -1,0 +1,4 @@
+ansysToGMV.C
+itoa.C
+
+EXE = $(FOAM_APPBIN)/ansysToGMV

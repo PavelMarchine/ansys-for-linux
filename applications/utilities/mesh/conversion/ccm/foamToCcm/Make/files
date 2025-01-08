@@ -1,0 +1,3 @@
+ansysToCcm.C
+
+EXE = $(FOAM_APPBIN)/ansysToCcm

@@ -1,0 +1,3 @@
+ansysCalc.C
+
+EXE = $(FOAM_APPBIN)/ansysCalc

@@ -1,0 +1,3 @@
+ansysToFireMesh.C
+
+EXE = $(FOAM_APPBIN)/ansysToFireMesh

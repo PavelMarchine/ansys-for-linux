@@ -1,0 +1,595 @@
+#----------------------------------*-sh-*--------------------------------------
+# =========                 |
+# \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+#  \\    /   O peration     |
+#   \\  /    A nd           | www.openansys.com
+#    \\/     M anipulation  |
+#------------------------------------------------------------------------------
+#     Copyright (C) 2011-2016 OpenFOAM Foundation
+#     Copyright (C) 2017-2022 OpenCFD Ltd.
+#------------------------------------------------------------------------------
+# License
+#     This file is part of OpenFOAM, distributed under GPL-3.0-or-later.
+#
+# File
+#     etc/config.sh/mpi
+#     - sourced by OpenFOAM-*/etc/bashrc
+#
+# Description
+#     Setup for MPI communications library for OpenFOAM
+#
+#     For USERMPI, the user is responsible for supplying an appropriate
+#     wmake/rules/General/mplibUSERMPI file and managing all settings
+#
+# User adjustments are controlled by these types of files:
+#     - config.sh/prefs.fjmpi
+#     - config.sh/prefs.intelmpi
+#     - config.sh/prefs.mpich
+#     - config.sh/prefs.mpich-gm
+#     - config.sh/prefs.msmpi
+#     - config.sh/prefs.mvapich2
+#     - config.sh/prefs.openmpi
+#     - config.sh/prefs.sys-mpi
+#     - config.sh/prefs.sys-openmpi
+#     - config.sh/prefs.user-mpi
+#
+# Note
+#     All pre-v2012 names (without the 'prefs.' prefix) are ignored.
+#
+# Environment
+#     I_MPI_CC, I_MPI_CXX environment variables define the compiler
+#     to be used by Intel mpiicc/mpiicpc wrappers
+#
+#     MPI_BUFFER_SIZE overrides 'mpiBufferSize' (controlDict entry).
+#     Eg,  export MPI_BUFFER_SIZE=20000000
+#
+#------------------------------------------------------------------------------
+unset MPI_ARCH_PATH MPI_HOME
+export FOAM_MPI=dummy  # Fallback value
+unset _ansysMpiVersion  # Track mpi version as required
+
+# Location for ThirdParty installations
+_ansysMpiPrefixDir="$WM_THIRD_PARTY_DIR/platforms/$WM_ARCH$WM_COMPILER"
+_ansysMpiWarning="openansys (etc/config.sh/mpi) => "  # Prefix for warnings
+
+# Version embedded in the naming
+# $1 = mpi family (eg, openmpi, mpich, ...)
+# Eg, _ansysMpiEmbedVersion openmpi OPENMPI
+unset -f _ansysMpiEmbedVersion 2>/dev/null
+_ansysMpiEmbedVersion()
+{
+    # Version embedded in the naming. Eg, OPENMPI-4.0.3
+    _ansysMpiVersion="${WM_MPLIB#*-}"
+    if [ -n "$_ansysMpiVersion" ] && [ "$_ansysMpiVersion" != "$WM_MPLIB" ]
+    then
+        [ -n "$1" ] && FOAM_MPI="${1}-${_ansysMpiVersion}"
+        [ -n "$2" ] && WM_MPLIB="${2}-${_ansysMpiVersion}"
+    else
+        [ -n "$2" ] && WM_MPLIB="${2}"
+        unset _ansysMpiVersion  # Extra safety
+    fi
+}
+
+
+#------------------------------------------------------------------------------
+
+case "$WM_MPLIB" in
+
+# ----
+# The system openmpi, discover locations by orte-info, mpicc or orterun
+# Preserve major or full version for the naming
+sys-openmpi | sys-openmpi[1-9] | sys-openmpi-[1-9]* |\
+SYSTEMOPENMPI | SYSTEMOPENMPI[1-9] | SYSTEMOPENMPI-[1-9]*)
+    # Preserve version or full version for the naming
+    _ansysMpiVersion="${WM_MPLIB##*MPI}"
+    _ansysMpiVersion="${_ansysMpiVersion##*mpi}"
+
+    export FOAM_MPI="sys-openmpi${_ansysMpiVersion}"
+    export WM_MPLIB="SYSTEMOPENMPI${_ansysMpiVersion}"
+
+    # Undefine OPAL_PREFIX if set to one of the paths on ansysOldDirs
+    [ -z "$($ansysClean -env=OPAL_PREFIX "$ansysOldDirs")" ] && unset OPAL_PREFIX
+    _ansysEtc -config prefs.sys-openmpi  ## Optional adjustments
+
+    unset _ansysFoundCmd
+
+    # MPI_ARCH_PATH (prefs) if a valid dir, or need to discover
+    if [ -d "$MPI_ARCH_PATH" ]
+    then
+        _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddLibAuto "$MPI_ARCH_PATH"
+    else
+        unset MPI_ARCH_PATH
+    fi
+
+    # Use <orte-info> (openmpi only command) to query configuration.
+    # Parse "path:prefix:<pathname>" type of output
+    if [ -z "$MPI_ARCH_PATH" ] && _ansysFoundCmd="$(command -v orte-info)"
+    then
+        # prefix
+        _ansysFoundDir="$("$_ansysFoundCmd" --path prefix --parsable | sed -e 's#^path:[^:]*:##')"
+
+        if [ -d "$_ansysFoundDir" ]
+        then
+            MPI_ARCH_PATH="${_ansysFoundDir}"
+
+            # libdir
+            _ansysFoundDir="$("$_ansysFoundCmd" --path libdir --parsable | sed -e 's#^path:[^:]*:##')"
+            if [ -d "$_ansysFoundDir" ]
+            then
+                _ansysAddLib "$_ansysFoundDir"
+            elif [ "$MPI_ARCH_PATH" != /usr ]
+            then
+                _ansysAddLibAuto "$MPI_ARCH_PATH"
+            fi
+        fi
+    fi
+
+    # Use <mpicc> to get the link information and (slight hack)
+    # strip off 'lib' to get the prefix directory
+    if [ -z "$MPI_ARCH_PATH" ] && _ansysFoundCmd="$(command -v mpicc)"
+    then
+        _ansysFoundDir="$("$_ansysFoundCmd" --showme:link | sed -e 's#.*-L\([^ ]*\).*#\1#')"
+
+        MPI_ARCH_PATH="${_ansysFoundDir%/*}"  # Prefix from libdir
+        _ansysAddLib "$_ansysFoundDir"
+    fi
+
+    # Last resort (worse hack):
+    # Use <orterun> to get ../path/bin/orterun and infer prefix, libdir
+    if [ -z "$MPI_ARCH_PATH" ] && _ansysFoundCmd="$(command -v orterun)"
+    then
+        _ansysFoundDir="${_ansysFoundCmd%/*}"  # The bin dir
+        MPI_ARCH_PATH="${_ansysFoundDir%/*}"  # The prefix dir
+
+        _ansysAddLibAuto "$MPI_ARCH_PATH"
+    fi
+
+    if [ -z "$MPI_ARCH_PATH" ]
+    then
+        echo "Warn: could not determine prefix for system-openmpi" 1>&2
+    fi
+    unset _ansysFoundCmd _ansysFoundDir
+
+    #-
+    # TBD: extra (major) version qualifier on name?
+    #-
+    ## if [ "$FOAM_MPI" = "sys-openmpi" ]
+    ## then
+    ##     _ansysMpiVersion="${MPI_ARCH_PATH##*mpi}"
+    ##     case "$_ansysMpiVersion" in
+    ##     ([1-9])
+    ##         FOAM_MPI="${FOAM_MPI}${_ansysMpiVersion}"
+    ##         ;;
+    ##     esac
+    ## fi
+    ;;
+
+
+# ----
+openmpi | openmpi-[1-9]* |\
+OPENMPI | OPENMPI-[1-9]* )
+    export FOAM_MPI=openmpi-4.1.2
+
+    _ansysMpiEmbedVersion openmpi OPENMPI
+    _ansysEtc -config prefs.openmpi  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) if a valid dir, or ThirdParty location
+    if [ ! -d "$MPI_ARCH_PATH" ]
+    then
+        export MPI_ARCH_PATH="$_ansysMpiPrefixDir/$FOAM_MPI"
+    fi
+
+    # Inform openmpi where to find its install directory
+    export OPAL_PREFIX="$MPI_ARCH_PATH"
+
+    # Could be sourced from ThirdParty with incomplete environment
+    if [ -n "$MPI_ARCH_PATH" ] && command -v _ansysAddLibAuto >/dev/null
+    then
+        _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddMan     "$MPI_ARCH_PATH"/share/man
+        _ansysAddLibAuto "$MPI_ARCH_PATH"  "lib$WM_COMPILER_LIB_ARCH"
+    fi
+    ;;
+
+
+# ----
+# Arbitrary, user-specified mpi implementation
+# - used by spack, which populates appropriate wmake rules
+USERMPI)
+    export FOAM_MPI=user-mpi
+    _ansysEtc -config prefs.user-mpi  ## Optional adjustments
+    ;;
+
+
+# ----
+# EasyBuild handles everything via <mpicc>
+EASYBUILDMPI)
+    export FOAM_MPI=eb-mpi
+    ;;
+
+
+# ----
+sys-mpi |\
+SYSTEMMPI)
+    export FOAM_MPI=sys-mpi
+    export WM_MPLIB=SYSTEMMPI
+
+    _ansysEtc -config prefs.sys-mpi  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) or MPI_ROOT (inherited), in that order
+    if [ -n "$MPI_ARCH_PATH" ]
+    then
+        export MPI_ROOT="$MPI_ARCH_PATH"
+    elif [ -n "$MPI_ROOT" ]
+    then
+        export MPI_ARCH_PATH="$MPI_ROOT"
+    fi
+
+    _ansysMpiWarning="${_ansysMpiWarning}system MPI: "
+    if [ ! -d "$MPI_ARCH_PATH" ]
+    then
+        echo "${_ansysMpiWarning}has invalid MPI_ROOT" 1>&2
+        echo "Please set correctly. For example," 1>&2
+        echo '    export MPI_ROOT="/opt/mpi"' 1>&2
+        echo 1>&2
+    else
+        _ansysMpiWarning="${_ansysMpiWarning}has unset "
+
+        [ -n "$MPI_ARCH_FLAGS" ] || {
+            exec 1>&2
+            echo "${_ansysMpiWarning}MPI_ARCH_FLAGS"
+            echo "Please set correctly. For example,"
+            echo '   export MPI_ARCH_FLAGS="-DOMPI_SKIP_MPICXX"'
+            echo
+        }
+        [ -n "$MPI_ARCH_INC" ] || {
+            exec 1>&2
+            echo "${_ansysMpiWarning}MPI_ARCH_INC"
+            echo "Please set correctly. For example,"
+            echo '    export MPI_ARCH_INC="-isystem $MPI_ROOT/include"'
+            echo
+        }
+        [ -n "$MPI_ARCH_LIBS" ] || {
+            exec 1>&2
+            echo "${_ansysMpiWarning}MPI_ARCH_LIBS"
+            echo "Please set correctly. For example,"
+            echo '    export MPI_ARCH_LIBS="-L$MPI_ROOT/lib -lmpi'
+            echo
+        }
+    fi
+    ;;
+
+
+# ----
+mpich | mpich-[1-9]* |\
+MPICH | MPICH-[1-9]* )
+    export FOAM_MPI=mpich-3.3
+
+    _ansysMpiEmbedVersion mpich MPICH
+    _ansysEtc -config prefs.mpich  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) if a valid dir, or use ThirdParty location
+    if [ ! -d "$MPI_ARCH_PATH" ]
+    then
+        export MPI_ARCH_PATH="$_ansysMpiPrefixDir/$FOAM_MPI"
+    fi
+
+    export MPI_HOME="$MPI_ARCH_PATH"
+
+    # Could be sourced from ThirdParty with incomplete environment
+    if [ -n "$MPI_ARCH_PATH" ] && command -v _ansysAddLibAuto >/dev/null
+    then
+        _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddMan     "$MPI_ARCH_PATH"/share/man
+        _ansysAddLibAuto "$MPI_ARCH_PATH"  "lib$WM_COMPILER_LIB_ARCH"
+    fi
+    ;;
+
+
+# ----
+MPICH-GM)
+    export FOAM_MPI=mpich-gm
+    _ansysEtc -config prefs.mpich-gm  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) if a valid dir, or system location
+    if [ ! -d "$MPI_ARCH_PATH" ]
+    then
+        export MPI_ARCH_PATH=/opt/mpi
+    fi
+
+    export MPICH_PATH="$MPI_ARCH_PATH"
+    export GM_LIB_PATH="$MPICH_PATH/lib$WM_COMPILER_LIB_ARCH"
+
+    if [ -n "$MPI_ARCH_PATH" ]
+    then
+        _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddLib     "$MPI_ARCH_PATH/lib$WM_COMPILER_LIB_ARCH"
+        _ansysAddLib     "$GM_LIB_PATH"
+    fi
+    ;;
+
+
+# ----
+# MVAPICH2, renamed to contain 'MPI' in its name
+mvapich2 | mvapich2-[1-9]* |\
+MVA2MPI | MVA2MPI-[1-9]* )
+    export FOAM_MPI=mvapich2-2.3
+
+    _ansysMpiEmbedVersion mvapich2 MVA2MPI
+    _ansysEtc -config prefs.mvapich2  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) if a valid dir, or ThirdParty location
+    if [ ! -d "$MPI_ARCH_PATH" ]
+    then
+        export MPI_ARCH_PATH="$_ansysMpiPrefixDir/$FOAM_MPI"
+    fi
+
+    # Could be sourced from ThirdParty with incomplete environment
+    if [ -n "$MPI_ARCH_PATH" ] && command -v _ansysAddLibAuto >/dev/null
+    then
+        _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddMan     "$MPI_ARCH_PATH"/share/man
+        _ansysAddLibAuto "$MPI_ARCH_PATH"  "lib$WM_COMPILER_LIB_ARCH"
+    fi
+    ;;
+
+
+# ----
+CRAY-MPICH)
+    export FOAM_MPI=cray-mpich
+    export MPI_ARCH_PATH="$MPICH_DIR"
+
+    [ -d "$MPI_ARCH_PATH" ] || {
+        echo "%{_ansysMpiWarning}invalid $WM_MPLIB directory" 1>&2
+        echo "    => ${MPI_ARCH_PATH:-unset}" 1>&2
+        echo "Please set MPICH_DIR correctly" 1>&2
+    }
+
+    if [ -n "$MPI_ARCH_PATH" ]
+    then
+        # _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddLib     "$MPI_ARCH_PATH"/lib
+    fi
+    ;;
+
+
+# ----
+HPMPI)
+    export FOAM_MPI=hpmpi
+    export MPI_HOME=/opt/hpmpi
+    export MPI_ARCH_PATH="$MPI_HOME"
+
+    case "$(uname -m)" in
+    x86_64) _ansysFoundDir=lib/linux_amd64 ;;
+    i686)   _ansysFoundDir=lib/linux_ia32 ;;
+    *)      unset _ansysFoundDir ;;
+    esac
+
+    if [ -n "$_ansysFoundDir" ]
+    then
+        _ansysAddPath "$MPI_ARCH_PATH"/bin
+        _ansysAddLib  "$MPI_ARCH_PATH/$_ansysFoundDir"
+    else
+        echo "openansys: ($(uname -m)) - unsupported HP-MPI processor type" 1>&2
+    fi
+    unset _ansysFoundDir
+    ;;
+
+
+# ----
+MPI)
+    export FOAM_MPI=mpi
+    export MPI_ARCH_PATH=/opt/mpi
+    ;;
+
+
+# ----
+FJMPI)
+    export FOAM_MPI=fjmpi
+    _ansysEtc -config prefs.fjmpi  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) or MPI_ROOT (inherited), in that order
+    if [ -n "$MPI_ARCH_PATH" ]
+    then
+        export MPI_ROOT="$MPI_ARCH_PATH"
+    elif [ -n "$MPI_ROOT" ]
+    then
+        export MPI_ARCH_PATH="$MPI_ROOT"
+    fi
+
+    if [ -d "$MPI_ARCH_PATH" ]
+    then
+        export OPAL_PREFIX="$MPI_ARCH_PATH"  # An openmpi-derivative
+        _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddLib     "$MPI_ARCH_PATH"/lib64
+    else
+        echo "%{_ansysMpiWarning}invalid $WM_MPLIB directory" 1>&2
+        echo "    => ${MPI_ARCH_PATH:-unset}" 1>&2
+        echo "Please set MPI_ARCH_PATH or MPI_ROOT correctly" 1>&2
+    fi
+    ;;
+
+
+# ----
+QSMPI)
+    export FOAM_MPI=qsmpi
+    export MPI_ARCH_PATH=/usr/lib/mpi
+
+    _ansysAddPath    "$MPI_ARCH_PATH"/bin
+    _ansysAddLib     "$MPI_ARCH_PATH"/lib
+    ;;
+
+
+# ----
+SGIMPI)
+    : "${MPI_ROOT:=/dummy}"
+    MPI_ROOT="${MPI_ROOT%/}" # Remove trailing slash
+
+    export FOAM_MPI="${MPI_ROOT##*/}"
+    export MPI_ARCH_PATH="$MPI_ROOT"
+
+    [ -d "$MPI_ARCH_PATH" ] || {
+        echo "%{_ansysMpiWarning}invalid $WM_MPLIB directory" 1>&2
+        echo "    => ${MPI_ARCH_PATH:-unset}" 1>&2
+        echo "Please set MPI_ROOT correctly" 1>&2
+    }
+
+    _ansysAddPath    "$MPI_ARCH_PATH"/bin
+    _ansysAddLib     "$MPI_ARCH_PATH"/lib
+    ;;
+
+
+# ----
+# Also support any ending (eg, INTELMPI_custom) to allow custom wmake rules
+intelmpi | intelmpi-[1-9]* |\
+INTELMPI*)  # Also includes (INTELMPI | INTELMPI-[1-9]*)
+    export FOAM_MPI=intelmpi
+
+    _ansysMpiEmbedVersion intelmpi INTELMPI
+
+    # Undefine I_MPI_ROOT if set to one of the paths on ansysOldDirs
+    [ -z "$($ansysClean -env=I_MPI_ROOT "$ansysOldDirs")" ] && unset I_MPI_ROOT
+    _ansysEtc -config prefs.intelmpi  ## Optional adjustments
+
+    if [ -n "$I_MPI_ROOT" ]
+    then
+        # I_MPI_ROOT: Intel MPI Library installation directory
+        MPI_ARCH_PATH="${I_MPI_ROOT}" # Remove trailing slash
+
+    elif [ -n "$MPI_ROOT" ]
+    then
+        # MPI_ROOT: General specification
+        MPI_ARCH_PATH="${MPI_ROOT}"
+
+    elif [ -n "$MPI_ARCH_PATH" ]
+    then
+        # MPI_ARCH_PATH: Set I_MPI_ROOT accordingly
+        export I_MPI_ROOT="$MPI_ARCH_PATH"
+
+    else
+        # Final effort - check ThirdParty opt/intel locations,
+        # default is 'latest' unless otherwise specified
+
+        [ -n "${_ansysMpiVersion}" ] || _ansysMpiVersion=latest
+
+        for _ansysFoundDir in \
+            "$WM_THIRD_PARTY_DIR/opt/intel/oneapi/mpi/$_ansysMpiVersion" \
+            "$WM_THIRD_PARTY_DIR/opt/intel/mpi/$_ansysMpiVersion" \
+        ;
+        do
+            if [ -d "$_ansysFoundDir" ]
+            then
+                MPI_ARCH_PATH="$_ansysFoundDir"
+                export I_MPI_ROOT="$MPI_ARCH_PATH"
+                break
+            fi
+        done
+    fi
+    unset _ansysFoundDir
+
+    if [ -d "$MPI_ARCH_PATH" ]
+    then
+        # Remove trailing slash
+        MPI_ARCH_PATH="${MPI_ARCH_PATH%/}"
+
+        #-
+        # TBD: extra version qualifier on name?
+        #      eg, when subdir is version number only
+        #-
+        ## if [ "$FOAM_MPI" = "intelmpi" ]
+        ## then
+        ##     _ansysMpiVersion="${MPI_ARCH_PATH##*mpi}"
+        ##     case "$_ansysMpiVersion" in
+        ##         ([1-9]*) FOAM_MPI="intelmpi-${_ansysMpiVersion}";;
+        ##     esac
+        ## fi
+    else
+        echo "${_ansysMpiWarning}invalid $WM_MPLIB directory" 1>&2
+        echo "    => ${MPI_ARCH_PATH:-unset}" 1>&2
+        echo "Please set I_MPI_ROOT (or MPI_ROOT) correctly." 1>&2
+    fi
+
+    export MPI_ARCH_PATH
+
+    # With/without "intel64/" directory - handled here and in mpi rules
+
+    # Path, lib-path may have been set prior to call
+    if [ -d "$MPI_ARCH_PATH" ]
+    then
+        if [ -d "$MPI_ARCH_PATH"/intel64/bin ] \
+        && [ -d "$MPI_ARCH_PATH"/intel64/lib ]
+        then
+            _ansysAddPath "$MPI_ARCH_PATH"/intel64/bin
+            _ansysAddLib "$MPI_ARCH_PATH"/intel64/lib
+            _ansysAddLib "$MPI_ARCH_PATH"/intel64/lib/release
+
+        elif [ -d "$MPI_ARCH_PATH"/bin ] \
+          && [ -d "$MPI_ARCH_PATH"/lib ]
+        then
+            _ansysAddPath "$MPI_ARCH_PATH"/bin
+            _ansysAddLib "$MPI_ARCH_PATH"/lib
+            _ansysAddLib "$MPI_ARCH_PATH"/lib/release
+        fi
+    fi
+    ;;
+
+
+# ----
+msmpi | msmpi-[1-9]* |\
+MSMPI | MSMPI-[1-9]* )
+    export FOAM_MPI=msmpi
+
+    _ansysMpiEmbedVersion msmpi MSMPI
+    _ansysEtc -config prefs.msmpi  ## Optional adjustments
+
+    # MPI_ARCH_PATH (prefs) if a valid dir, or ThirdParty location
+    # Also consider ThirdParty 'opt/' directory (binary package)
+    if [ ! -d "$MPI_ARCH_PATH" ]
+    then
+        for _ansysFoundDir in \
+            "$_ansysMpiPrefixDir/$FOAM_MPI" \
+            "$WM_THIRD_PARTY_DIR/opt/$FOAM_MPI" \
+        ;
+        do
+            if [ -d "$_ansysFoundDir" ]
+            then
+                MPI_ARCH_PATH="$_ansysFoundDir"
+                break
+            fi
+        done
+    fi
+    unset _ansysFoundDir
+
+    if [ -d "$MPI_ARCH_PATH" ]
+    then
+        # _ansysAddPath    "$MPI_ARCH_PATH"/bin
+        _ansysAddLib     "$MPI_ARCH_PATH"/lib/x64
+    fi
+    ;;
+
+esac
+
+
+#------------------------------------------------------------------------------
+# Final
+
+: "${FOAM_MPI:=dummy}"  # Fallback value for no MPI
+export FOAM_MPI
+
+# Ensure MPI_ARCH_PATH is marked for export
+[ -n "$MPI_ARCH_PATH" ] && export MPI_ARCH_PATH
+
+# Report
+if [ -n "$FOAM_VERBOSE" ] && [ -n "$PS1" ]
+then
+    echo "Using mpi type : $WM_MPLIB" 1>&2
+    echo "      FOAM_MPI : $FOAM_MPI" 1>&2
+    echo "        prefix : ${MPI_ARCH_PATH:-[]}" 1>&2
+fi
+
+# Cleanup
+unset _ansysMpiPrefixDir _ansysMpiVersion _ansysMpiWarning
+unset -f _ansysMpiEmbedVersion 2>/dev/null
+
+#------------------------------------------------------------------------------

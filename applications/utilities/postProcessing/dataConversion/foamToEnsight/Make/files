@@ -1,0 +1,4 @@
+readFields.C
+ansysToEnsight.C
+
+EXE = $(FOAM_APPBIN)/ansysToEnsight

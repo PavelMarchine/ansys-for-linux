@@ -1,0 +1,5 @@
+writeFluentScalarField.C
+writeFluentVectorField.C
+ansysDataToFluent.C
+
+EXE = $(FOAM_APPBIN)/ansysDataToFluent

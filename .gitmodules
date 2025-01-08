@@ -1,0 +1,25 @@
+[submodule "cfmesh"]
+	path = plugins/cfmesh
+	url = https://develop.openansys.com/Community/integration-cfmesh.git
+[submodule "avalanche"]
+	path = plugins/avalanche
+	url = https://develop.openansys.com/Community/avalanche.git
+[submodule "adios"]
+	path = modules/adios
+	url = https://develop.openansys.com/Community/adiosansys.git
+[submodule "OpenQBMM"]
+	path = modules/OpenQBMM
+	url = https://github.com/OpenQBMM/OpenQBMM.git
+	branch = openansys.com
+[submodule "visualization"]
+	path = modules/visualization
+	url = https://develop.openansys.com/modules/visualization.git
+[submodule "external-solver"]
+	path = modules/external-solver
+	url = https://develop.openansys.com/Modules/external-solver.git
+[submodule "turbulence-community"]
+	path = plugins/turbulence-community
+	url = https://gitlab.com/openansys/community/tc-turbulence/turbulence-community.git
+[submodule "plugins/data-community"]
+	path = plugins/data-community
+	url = https://gitlab.com/openansys/community/sig-data-modelling/data-community.git

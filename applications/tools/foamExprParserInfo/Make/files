@@ -1,0 +1,3 @@
+ansysExprParserInfo.C
+
+EXE = $(FOAM_APPBIN)/ansysExprParserInfo
