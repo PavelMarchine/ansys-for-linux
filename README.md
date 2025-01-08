@@ -86,6 +86,7 @@ ansys -gui
 ## Contact
 
 For support or inquiries, please email kernel at firemail.cc.
+
 ---
 
 Enjoy seamless simulations on Linux with Ansys for Linux!
