@@ -76,10 +76,6 @@ ansys -gui
 - **Performance Problems:**
   Use `htop` or `top` to monitor system resources and ensure adequate memory and CPU cores are available.
 
-## Contributing
-
-We welcome contributions! If you encounter bugs or have feature requests, submit an issue or create a pull request on our [GitHub repository](https://github.com/example/ansys-linux).
-
 
 
 ## Acknowledgments
